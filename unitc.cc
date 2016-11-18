@@ -112,19 +112,86 @@ static void handle_finish_function(void *gcc_data, void *user_data) {
   check(body);
 }
 
+static void skip_white(const char **sp) {
+  while (ISSPACE(**sp)) (*sp)++;
+}
+
+// Parser for units.
+// Right now only checks syntax.
+static bool parse_factor(const char **sp);
+static bool parse_product(const char **sp);
+
+static bool parse_factor(const char **sp) {
+  if (**sp == '1' && !ISDIGIT(*(*sp + 1))) {
+    // dimensionless unit
+    (*sp)++;
+    return true;
+  }
+  else if (ISALPHA(**sp)) {
+    // identifier
+    while (ISALPHA(**sp)) {
+      (*sp)++;
+    }
+    return true;
+  }
+  else if (**sp == '(') {
+    (*sp)++;
+    skip_white(sp);
+    if (!parse_product(sp)) {
+      return false;
+    }
+    skip_white(sp);
+    if (**sp != ')') {
+      return false;
+    }
+    (*sp)++;
+  }
+  return false;
+}
+
+static bool parse_product(const char **sp) {
+  skip_white(sp);
+  if (!parse_factor(sp)) {
+    return false;
+  }
+  skip_white(sp);
+  while (**sp == '*' || **sp == '/') {
+    (*sp)++;
+    skip_white(sp);
+    if (!parse_factor(sp)) {
+      return false;
+    }
+  }
+  skip_white(sp);
+  if (**sp != '\0') {
+    return false;
+  }
+  return true;
+}
+
+static bool unit_well_formed(const char *unit_str) {
+  return parse_product(&unit_str);
+}
+
+static bool unit_attribute_well_formed(tree t) {
+  return
+    t != NULL_TREE &&
+    TREE_CODE(t) == TREE_LIST &&
+    TREE_CHAIN(t) == NULL_TREE &&
+    TREE_VALUE(t) != NULL_TREE &&
+    TREE_CODE(TREE_VALUE(t)) == STRING_CST &&
+    unit_well_formed(TREE_STRING_POINTER(TREE_VALUE(t)));
+}
 
 static tree handle_unit_attribute(tree *node, tree name, tree args,
 				  int flags, bool *no_add_attrs) {
+  (void) node;
   (void) name;
   (void) flags;
   (void) no_add_attrs;
-  fprintf(stderr, "handle_unit_attribute: %s %i %s\n",
-	  get_tree_code_name(TREE_CODE(*node)),
-	  flags,
-	  get_tree_code_name(TREE_CODE(args)));
-  //debug_generic_expr(*node);
-  //debug_tree_chain(args);
-  // TODO validate attribute
+  if (!unit_attribute_well_formed(args)) {
+    error("unit not well-formed");
+  }
   return NULL_TREE;
 }
 

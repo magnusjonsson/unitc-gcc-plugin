@@ -10,6 +10,12 @@ int unit(meters) length2;
 
 unit(meters) int length3;
 
+double unit(meters * meters) area;
+
+double unit(1) unitless1;
+
+double unit(meters / meters) unitless2;
+
 double one(void) {
   return 1;
 }
