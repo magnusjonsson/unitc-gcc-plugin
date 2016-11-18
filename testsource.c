@@ -10,6 +10,14 @@ int unit(meters) length2;
 
 unit(meters) int length3;
 
+double one(void) {
+  return 1;
+}
+
+double square(double x) {
+  return x * x;
+}
+
 int main(int argc, char **argv) {
   int x = argc;
   return x >= 2;

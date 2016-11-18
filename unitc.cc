@@ -3,8 +3,17 @@
 #include <tree.h>
 #include <tree-iterator.h>
 #include <tree-pretty-print.h>
+#include <diagnostic.h>
 
-__attribute__ ((visibility ("default"))) int plugin_is_GPL_compatible;
+#include <assert.h>
+
+__attribute__ ((visibility ("default")))
+int plugin_is_GPL_compatible;
+
+
+#define TODO(fmt, ...) warning(0, "unitc TODO: " fmt, ##__VA_ARGS__)
+#define TODO_HANDLE(t) TODO("handle %s in %s:%i", get_tree_code_name(TREE_CODE(t)), __FUNCTION__, __LINE__)
+
 
 static void handle_finish_type(void *gcc_data, void *user_data)
 {
@@ -42,29 +51,65 @@ static void handle_finish_decl(void *gcc_data, void *user_data)
   }
 }
 
+static void check(tree t) {
+  switch (TREE_CODE(t)) {
+  case INTEGER_CST:
+    break;
+  case REAL_CST:
+    break;
+  case PARM_DECL:
+    break;
+  case RESULT_DECL:
+    break;
+  case RETURN_EXPR:
+    check(TREE_OPERAND(t, 0));
+    break;
+  case DECL_EXPR:
+    check(DECL_EXPR_DECL(t));
+    break;
+  case VAR_DECL:
+    check(DECL_INITIAL(t));
+    break;
+  case MODIFY_EXPR:
+    //TODO("check MODIFY_EXPR");
+    debug_generic_expr(t);
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case MULT_EXPR:
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case GT_EXPR:
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case BIND_EXPR:
+    (void) BIND_EXPR_VARS(t);
+    check(BIND_EXPR_BODY(t));
+    break;
+  case STATEMENT_LIST:
+    for (tree_stmt_iterator iter = tsi_start(t); !tsi_end_p(iter); tsi_next(&iter)) {
+      fprintf(stderr, "iter: ");
+      check(tsi_stmt(iter));
+    }
+    break;
+  default:
+    TODO_HANDLE(t);
+    debug_generic_expr(t);
+    break;
+  }
+}
+
 static void handle_finish_function(void *gcc_data, void *user_data) {
   (void) user_data;
   tree t = (tree) gcc_data;
   tree args = DECL_ARGUMENTS(t);
   tree type = TREE_TYPE(t);
-  tree saved_tree = DECL_SAVED_TREE(t);
-
-  fprintf(stderr, "finish_function: %s %s %s %s\n",
-	  get_tree_code_name(TREE_CODE(t)),
-	  get_tree_code_name(TREE_CODE(type)),
-	  get_tree_code_name(TREE_CODE(args)),
-	  get_tree_code_name(TREE_CODE(saved_tree)));
-	 
-  debug_generic_expr(t);
-  debug_generic_expr(type);
-  debug_tree_chain(args);
-  debug_generic_expr(saved_tree);
-
-  // this is not working
-  for (tree_stmt_iterator tsi = tsi_start(saved_tree); tsi_end_p(tsi); tsi_next(&tsi)) {
-    fprintf(stderr, "tsi: ");
-    debug_generic_expr(tsi_stmt(tsi));
-  }
+  tree body = DECL_SAVED_TREE(t);
+  (void) args;
+  (void) type;
+  check(body);
 }
 
 
@@ -102,7 +147,8 @@ static void register_attributes(void *gcc_data, void *user_data)
 }
 
 
-__attribute__ ((visibility ("default"))) int plugin_init(struct plugin_name_args *plugin_info,
+__attribute__ ((visibility ("default")))
+int plugin_init(struct plugin_name_args *plugin_info,
 	    struct plugin_gcc_version *version)
 {
   if (!plugin_default_version_check (version, &gcc_version)) {
