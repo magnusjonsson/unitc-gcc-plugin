@@ -1,9 +1,11 @@
+#include <stdlib.h>
 #include <gcc-plugin.h>
 #include <plugin-version.h>
 #include <tree.h>
 #include <tree-iterator.h>
 #include <tree-pretty-print.h>
 #include <diagnostic.h>
+#include <stringpool.h>
 
 #include <assert.h>
 
@@ -101,6 +103,85 @@ static void check(tree t) {
   }
 }
 
+typedef tree base_unit_t;
+static base_unit_t intern_base_unit(const char *name, size_t length) {
+  return get_identifier_with_length(name, length);
+}
+
+const char *base_unit_string(base_unit_t b) {
+  return IDENTIFIER_POINTER(b);
+}
+
+
+#define MAX_UNIT_SIZE 16
+typedef int16_t power_t;
+
+struct unit {
+  base_unit_t base_unit[MAX_UNIT_SIZE];
+  power_t power[MAX_UNIT_SIZE];
+};
+
+static void dump_unit(const struct unit *u) {
+  bool anything_printed = false;
+  for (int i = 0; i < MAX_UNIT_SIZE; i++) {
+    if (u->power[i] != 0) {
+      anything_printed = true;
+      fprintf(stderr, base_unit_string(u->base_unit[i]));
+      if (u->power[i] != 1) {
+	fprintf(stderr, "^%i", u->power[i]);
+      }			    
+    }
+  }
+  if (!anything_printed) {
+    fprintf(stderr, "1");
+  }
+  fprintf(stderr, "\n");
+}
+
+static struct unit unit_one;
+
+static void unit_mul_assign_base_unit_power(struct unit *u, base_unit_t b, power_t p) {
+  for (int i = 0; i < MAX_UNIT_SIZE; i++) {
+    if (u->power[i] == 0) {
+      u->base_unit[i] = b;
+      u->power[i] = p;
+      return;
+    }
+    if (u->base_unit[i] == b) {
+      u->power[i] += p;
+      if (u->power[i] == 0) {
+	for (int j = i; j < MAX_UNIT_SIZE - 1; j++) {
+  	  u->base_unit[j] = u->base_unit[j + 1];
+	  u->power[j] = u->power[j + 1];
+	}
+	u->base_unit[MAX_UNIT_SIZE - 1] = 0;
+	u->power[MAX_UNIT_SIZE - 1] = 0;
+      }
+      return;
+    }
+    if (u->base_unit[i] > b) {
+      base_unit_t tmp_b = u->base_unit[i];
+      power_t tmp_p = u->power[i];
+      u->base_unit[i] = b;
+      u->power[i] = p;
+      b = tmp_b;
+      p = tmp_p;
+    }
+  }
+}
+
+static void unit_mul_assign(struct unit *lhs, const struct unit *rhs) {
+  for (int i = 0; i < MAX_UNIT_SIZE && rhs->power[i] != 0; i++) {
+    unit_mul_assign_base_unit_power(lhs, rhs->base_unit[i], rhs->power[i]);
+  }
+}
+
+static void unit_div_assign(struct unit *lhs, const struct unit *rhs) {
+  for (int i = 0; i < MAX_UNIT_SIZE && rhs->power[i] != 0; i++) {
+    unit_mul_assign_base_unit_power(lhs, rhs->base_unit[i], -rhs->power[i]);
+  }
+}
+
 static void handle_finish_function(void *gcc_data, void *user_data) {
   (void) user_data;
   tree t = (tree) gcc_data;
@@ -118,26 +199,35 @@ static void skip_white(const char **sp) {
 
 // Parser for units.
 // Right now only checks syntax.
-static bool parse_factor(const char **sp);
-static bool parse_product(const char **sp);
+static bool parse_factor(const char **sp, struct unit *out);
+static bool parse_product(const char **sp, struct unit *out);
 
-static bool parse_factor(const char **sp) {
+static bool parse_factor(const char **sp, struct unit *out) {
   if (**sp == '1' && !ISDIGIT(*(*sp + 1))) {
     // dimensionless unit
     (*sp)++;
+    *out = unit_one;
     return true;
   }
   else if (ISALPHA(**sp)) {
+    const char *start = *sp;
     // identifier
     while (ISALPHA(**sp)) {
       (*sp)++;
     }
+    const char *end = *sp;
+    base_unit_t base_unit = intern_base_unit(start, end - start);
+    struct unit tmp = {
+      .base_unit = { base_unit },
+      .power = { 1 },
+    };
+    *out = tmp;
     return true;
   }
   else if (**sp == '(') {
     (*sp)++;
     skip_white(sp);
-    if (!parse_product(sp)) {
+    if (!parse_product(sp, out)) {
       return false;
     }
     skip_white(sp);
@@ -145,22 +235,31 @@ static bool parse_factor(const char **sp) {
       return false;
     }
     (*sp)++;
+    return true;
   }
   return false;
 }
 
-static bool parse_product(const char **sp) {
+static bool parse_product(const char **sp, struct unit *out) {
   skip_white(sp);
-  if (!parse_factor(sp)) {
+  if (!parse_factor(sp, out)) {
     return false;
   }
   skip_white(sp);
-  while (**sp == '*' || **sp == '/') {
+  while (true) {
+    char op = **sp;
+    if (!(op == '*' || op == '/')) {
+      break;
+    }
     (*sp)++;
     skip_white(sp);
-    if (!parse_factor(sp)) {
+    struct unit tmp;
+    if (!parse_factor(sp, &tmp)) {
       return false;
     }
+    if (op == '*') { unit_mul_assign(out, &tmp); }
+    else if (op == '/') { unit_div_assign(out, &tmp); }
+    else { internal_error("impossible"); }
   }
   skip_white(sp);
   if (**sp != '\0') {
@@ -169,18 +268,18 @@ static bool parse_product(const char **sp) {
   return true;
 }
 
-static bool unit_well_formed(const char *unit_str) {
-  return parse_product(&unit_str);
+static bool parse_unit_string(const char *unit_str, struct unit *out) {
+  return parse_product(&unit_str, out);
 }
 
-static bool unit_attribute_well_formed(tree t) {
+static bool parse_unit_attribute(tree t, struct unit *out) {
   return
     t != NULL_TREE &&
     TREE_CODE(t) == TREE_LIST &&
     TREE_CHAIN(t) == NULL_TREE &&
     TREE_VALUE(t) != NULL_TREE &&
     TREE_CODE(TREE_VALUE(t)) == STRING_CST &&
-    unit_well_formed(TREE_STRING_POINTER(TREE_VALUE(t)));
+    parse_unit_string(TREE_STRING_POINTER(TREE_VALUE(t)), out);
 }
 
 static tree handle_unit_attribute(tree *node, tree name, tree args,
@@ -189,8 +288,11 @@ static tree handle_unit_attribute(tree *node, tree name, tree args,
   (void) name;
   (void) flags;
   (void) no_add_attrs;
-  if (!unit_attribute_well_formed(args)) {
+  struct unit u;
+  if (!parse_unit_attribute(args, &u)) {
     error("unit not well-formed");
+  } else {
+    dump_unit(&u);
   }
   return NULL_TREE;
 }
