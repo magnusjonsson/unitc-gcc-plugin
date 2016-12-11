@@ -189,53 +189,74 @@ static bool parse_unit_attribute(tree t, struct unit *out) {
 
 // Unit checking.
 
-static void check(tree t) {
+struct maybe_unit {
+  bool have_unit;
+  struct unit unit;
+};
+
+static struct maybe_unit no_unit;
+
+static struct maybe_unit just_one = {
+  .have_unit = true,
+  .unit = {},
+};
+
+/*
+struct maybe_unit just_unit(struct unit unit) {
+  struct maybe_unit m = {
+    .have_unit = true,
+    .unit = unit,
+  };
+  return m;
+}
+*/
+
+static struct maybe_unit check(tree t) {
   switch (TREE_CODE(t)) {
   case INTEGER_CST:
-    break;
+    return just_one;
   case REAL_CST:
-    break;
+    return just_one;
   case PARM_DECL:
-    break;
+    return no_unit;
   case RESULT_DECL:
-    break;
+    return no_unit;
   case RETURN_EXPR:
-    check(TREE_OPERAND(t, 0));
-    break;
+    return check(TREE_OPERAND(t, 0));
   case DECL_EXPR:
     check(DECL_EXPR_DECL(t));
-    break;
+    return no_unit;
   case VAR_DECL:
     check(DECL_INITIAL(t));
-    break;
+    return no_unit;
   case MODIFY_EXPR:
-    //TODO("check MODIFY_EXPR");
-    debug_generic_expr(t);
     check(TREE_OPERAND(t, 0));
     check(TREE_OPERAND(t, 1));
-    break;
+    return no_unit;
   case MULT_EXPR:
     check(TREE_OPERAND(t, 0));
     check(TREE_OPERAND(t, 1));
-    break;
+    return no_unit;
   case GT_EXPR:
     check(TREE_OPERAND(t, 0));
     check(TREE_OPERAND(t, 1));
-    break;
+    return no_unit;
   case BIND_EXPR:
     (void) BIND_EXPR_VARS(t);
     check(BIND_EXPR_BODY(t));
-    break;
+    return no_unit;
   case STATEMENT_LIST:
-    for (tree_stmt_iterator iter = tsi_start(t); !tsi_end_p(iter); tsi_next(&iter)) {
-      fprintf(stderr, "iter: ");
-      check(tsi_stmt(iter));
+    {
+      struct maybe_unit last = no_unit;
+      for (tree_stmt_iterator iter = tsi_start(t); !tsi_end_p(iter); tsi_next(&iter)) {
+	last = check(tsi_stmt(iter));
+      }
+      return last;
     }
-    break;
   default:
     TODO_HANDLE(t);
-    debug_generic_expr(t);
-    break;
+    //debug_generic_expr(t);
+    return no_unit;
   }
 }
 
@@ -246,11 +267,11 @@ static void handle_finish_type(void *gcc_data, void *user_data)
   (void) user_data;
   tree t = (tree) gcc_data;
   tree attrs = TYPE_ATTRIBUTES(t);
+  (void) attrs;
 
-  fprintf(stderr, "finish_type: %s\n",
-	  get_tree_code_name(TREE_CODE(t)));
-  debug_generic_expr(t);
-  debug_tree_chain(attrs);
+  //fprintf(stderr, "finish_type: %s\n", get_tree_code_name(TREE_CODE(t)));
+  //debug_generic_expr(t);
+  //debug_tree_chain(attrs);
 }
 
 static void handle_finish_decl(void *gcc_data, void *user_data)
@@ -261,19 +282,19 @@ static void handle_finish_decl(void *gcc_data, void *user_data)
   tree attrs = TYPE_ATTRIBUTES(type);
   tree unit_attr = lookup_attribute("unit", attrs);
 
-  fprintf(stderr, "finish_decl: %s %s\n",
-	  get_tree_code_name(TREE_CODE(t)),
-	  get_tree_code_name(TREE_CODE(type)));
+  //fprintf(stderr, "finish_decl: %s %s\n",
+  //        get_tree_code_name(TREE_CODE(t)),
+  //        get_tree_code_name(TREE_CODE(type)));
 
-  fprintf(stderr, "t: ");
-  debug_generic_expr(t);
-  fprintf(stderr, "type: ");
-  debug_generic_expr(type);
+  //fprintf(stderr, "t: ");
+  //debug_generic_expr(t);
+  //fprintf(stderr, "type: ");
+  //debug_generic_expr(type);
   //fprintf(stderr, "attrs: ");
   //debug_tree_chain(attrs);
   if (unit_attr != NULL_TREE) {
-    fprintf(stderr, "unit: ");
-    debug_generic_expr(unit_attr);
+    //fprintf(stderr, "unit: ");
+    //debug_generic_expr(unit_attr);
   }
 }
 
@@ -298,7 +319,8 @@ static tree handle_unit_attribute(tree *node, tree name, tree args,
   if (!parse_unit_attribute(args, &u)) {
     error("unit not well-formed");
   } else {
-    dump_unit(&u);
+    (void) dump_unit;
+    //dump_unit(&u);
   }
   return NULL_TREE;
 }
