@@ -16,92 +16,7 @@ int plugin_is_GPL_compatible;
 #define TODO(fmt, ...) warning(0, "unitc TODO: " fmt, ##__VA_ARGS__)
 #define TODO_HANDLE(t) TODO("handle %s in %s:%i", get_tree_code_name(TREE_CODE(t)), __FUNCTION__, __LINE__)
 
-
-static void handle_finish_type(void *gcc_data, void *user_data)
-{
-  (void) user_data;
-  tree t = (tree) gcc_data;
-  tree attrs = TYPE_ATTRIBUTES(t);
-
-  fprintf(stderr, "finish_type: %s\n",
-	  get_tree_code_name(TREE_CODE(t)));
-  debug_generic_expr(t);
-  debug_tree_chain(attrs);
-}
-
-static void handle_finish_decl(void *gcc_data, void *user_data)
-{
-  (void) user_data;
-  tree t = (tree) gcc_data;
-  tree type = TREE_TYPE(t);
-  tree attrs = TYPE_ATTRIBUTES(type);
-  tree unit_attr = lookup_attribute("unit", attrs);
-
-  fprintf(stderr, "finish_decl: %s %s\n",
-	  get_tree_code_name(TREE_CODE(t)),
-	  get_tree_code_name(TREE_CODE(type)));
-
-  fprintf(stderr, "t: ");
-  debug_generic_expr(t);
-  fprintf(stderr, "type: ");
-  debug_generic_expr(type);
-  //fprintf(stderr, "attrs: ");
-  //debug_tree_chain(attrs);
-  if (unit_attr != NULL_TREE) {
-    fprintf(stderr, "unit: ");
-    debug_generic_expr(unit_attr);
-  }
-}
-
-static void check(tree t) {
-  switch (TREE_CODE(t)) {
-  case INTEGER_CST:
-    break;
-  case REAL_CST:
-    break;
-  case PARM_DECL:
-    break;
-  case RESULT_DECL:
-    break;
-  case RETURN_EXPR:
-    check(TREE_OPERAND(t, 0));
-    break;
-  case DECL_EXPR:
-    check(DECL_EXPR_DECL(t));
-    break;
-  case VAR_DECL:
-    check(DECL_INITIAL(t));
-    break;
-  case MODIFY_EXPR:
-    //TODO("check MODIFY_EXPR");
-    debug_generic_expr(t);
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    break;
-  case MULT_EXPR:
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    break;
-  case GT_EXPR:
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    break;
-  case BIND_EXPR:
-    (void) BIND_EXPR_VARS(t);
-    check(BIND_EXPR_BODY(t));
-    break;
-  case STATEMENT_LIST:
-    for (tree_stmt_iterator iter = tsi_start(t); !tsi_end_p(iter); tsi_next(&iter)) {
-      fprintf(stderr, "iter: ");
-      check(tsi_stmt(iter));
-    }
-    break;
-  default:
-    TODO_HANDLE(t);
-    debug_generic_expr(t);
-    break;
-  }
-}
+// Base units.
 
 typedef tree base_unit_t;
 static base_unit_t intern_base_unit(const char *name, size_t length) {
@@ -112,6 +27,7 @@ const char *base_unit_string(base_unit_t b) {
   return IDENTIFIER_POINTER(b);
 }
 
+// Units
 
 #define MAX_UNIT_SIZE 16
 typedef int16_t power_t;
@@ -120,6 +36,8 @@ struct unit {
   base_unit_t base_unit[MAX_UNIT_SIZE];
   power_t power[MAX_UNIT_SIZE];
 };
+
+static struct unit unit_one;
 
 static void dump_unit(const struct unit *u) {
   bool anything_printed = false;
@@ -138,7 +56,6 @@ static void dump_unit(const struct unit *u) {
   fprintf(stderr, "\n");
 }
 
-static struct unit unit_one;
 
 static void unit_mul_assign_base_unit_power(struct unit *u, base_unit_t b, power_t p) {
   for (int i = 0; i < MAX_UNIT_SIZE; i++) {
@@ -182,29 +99,17 @@ static void unit_div_assign(struct unit *lhs, const struct unit *rhs) {
   }
 }
 
-static void handle_finish_function(void *gcc_data, void *user_data) {
-  (void) user_data;
-  tree t = (tree) gcc_data;
-  tree args = DECL_ARGUMENTS(t);
-  tree type = TREE_TYPE(t);
-  tree body = DECL_SAVED_TREE(t);
-  (void) args;
-  (void) type;
-  check(body);
-}
-
 static void skip_white(const char **sp) {
   while (ISSPACE(**sp)) (*sp)++;
 }
 
 // Parser for units.
-// Right now only checks syntax.
+
 static bool parse_factor(const char **sp, struct unit *out);
 static bool parse_product(const char **sp, struct unit *out);
 
 static bool parse_factor(const char **sp, struct unit *out) {
   if (**sp == '1' && !ISDIGIT(*(*sp + 1))) {
-    // dimensionless unit
     (*sp)++;
     *out = unit_one;
     return true;
@@ -282,6 +187,107 @@ static bool parse_unit_attribute(tree t, struct unit *out) {
     parse_unit_string(TREE_STRING_POINTER(TREE_VALUE(t)), out);
 }
 
+// Unit checking.
+
+static void check(tree t) {
+  switch (TREE_CODE(t)) {
+  case INTEGER_CST:
+    break;
+  case REAL_CST:
+    break;
+  case PARM_DECL:
+    break;
+  case RESULT_DECL:
+    break;
+  case RETURN_EXPR:
+    check(TREE_OPERAND(t, 0));
+    break;
+  case DECL_EXPR:
+    check(DECL_EXPR_DECL(t));
+    break;
+  case VAR_DECL:
+    check(DECL_INITIAL(t));
+    break;
+  case MODIFY_EXPR:
+    //TODO("check MODIFY_EXPR");
+    debug_generic_expr(t);
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case MULT_EXPR:
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case GT_EXPR:
+    check(TREE_OPERAND(t, 0));
+    check(TREE_OPERAND(t, 1));
+    break;
+  case BIND_EXPR:
+    (void) BIND_EXPR_VARS(t);
+    check(BIND_EXPR_BODY(t));
+    break;
+  case STATEMENT_LIST:
+    for (tree_stmt_iterator iter = tsi_start(t); !tsi_end_p(iter); tsi_next(&iter)) {
+      fprintf(stderr, "iter: ");
+      check(tsi_stmt(iter));
+    }
+    break;
+  default:
+    TODO_HANDLE(t);
+    debug_generic_expr(t);
+    break;
+  }
+}
+
+// GCC plugin callbacks.
+
+static void handle_finish_type(void *gcc_data, void *user_data)
+{
+  (void) user_data;
+  tree t = (tree) gcc_data;
+  tree attrs = TYPE_ATTRIBUTES(t);
+
+  fprintf(stderr, "finish_type: %s\n",
+	  get_tree_code_name(TREE_CODE(t)));
+  debug_generic_expr(t);
+  debug_tree_chain(attrs);
+}
+
+static void handle_finish_decl(void *gcc_data, void *user_data)
+{
+  (void) user_data;
+  tree t = (tree) gcc_data;
+  tree type = TREE_TYPE(t);
+  tree attrs = TYPE_ATTRIBUTES(type);
+  tree unit_attr = lookup_attribute("unit", attrs);
+
+  fprintf(stderr, "finish_decl: %s %s\n",
+	  get_tree_code_name(TREE_CODE(t)),
+	  get_tree_code_name(TREE_CODE(type)));
+
+  fprintf(stderr, "t: ");
+  debug_generic_expr(t);
+  fprintf(stderr, "type: ");
+  debug_generic_expr(type);
+  //fprintf(stderr, "attrs: ");
+  //debug_tree_chain(attrs);
+  if (unit_attr != NULL_TREE) {
+    fprintf(stderr, "unit: ");
+    debug_generic_expr(unit_attr);
+  }
+}
+
+static void handle_finish_function(void *gcc_data, void *user_data) {
+  (void) user_data;
+  tree t = (tree) gcc_data;
+  tree args = DECL_ARGUMENTS(t);
+  tree type = TREE_TYPE(t);
+  tree body = DECL_SAVED_TREE(t);
+  (void) args;
+  (void) type;
+  check(body);
+}
+
 static tree handle_unit_attribute(tree *node, tree name, tree args,
 				  int flags, bool *no_add_attrs) {
   (void) node;
@@ -296,6 +302,8 @@ static tree handle_unit_attribute(tree *node, tree name, tree args,
   }
   return NULL_TREE;
 }
+
+// GCC plugin initialization.
 
 const struct attribute_spec unit_attribute_spec = {
   .name = "unit",
