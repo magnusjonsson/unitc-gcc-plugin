@@ -24,7 +24,22 @@ double square(double x) {
   return x * x;
 }
 
+double unit(meters*meters) square_length(double unit(meters) x) {
+  return x * x;
+}
+
+double unit(meters) square_length_error(double unit(meters) x) {
+  return x * x;
+}
+
 int main(int argc, char **argv) {
   int x = argc;
+  length1 = length2;
+  area = length1 * length2;
+
+  int b;
+  b = (double) length1 == length2;
+  b = (double unit(blah)) length1 == (double) length2;
+  b = 0;
   return x >= 2;
 }

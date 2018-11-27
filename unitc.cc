@@ -4,8 +4,9 @@
 #include <tree.h>
 #include <tree-iterator.h>
 #include <tree-pretty-print.h>
-#include <diagnostic.h>
 #include <stringpool.h>
+#include <attribs.h>
+#include <diagnostic.h>
 
 #include <assert.h>
 
@@ -19,6 +20,7 @@ int plugin_is_GPL_compatible;
 // Base units.
 
 typedef tree base_unit_t;
+
 static base_unit_t intern_base_unit(const char *name, size_t length) {
   return get_identifier_with_length(name, length);
 }
@@ -30,6 +32,7 @@ const char *base_unit_string(base_unit_t b) {
 // Units
 
 #define MAX_UNIT_SIZE 16
+
 typedef int16_t power_t;
 
 struct unit {
@@ -39,23 +42,28 @@ struct unit {
 
 static struct unit unit_one;
 
-static void dump_unit(const struct unit *u) {
-  bool anything_printed = false;
+static const char *unit_string(const struct unit *u) {
+  char result[1000];
+  int p = 0;
+#define P(fmt, ...) if (p < 1000) { int n = snprintf(result + p, 1000 - p, fmt, ##__VA_ARGS__); if (n > 0) p += n; }
   for (int i = 0; i < MAX_UNIT_SIZE; i++) {
-    if (u->power[i] != 0) {
-      anything_printed = true;
-      fprintf(stderr, base_unit_string(u->base_unit[i]));
-      if (u->power[i] != 1) {
-	fprintf(stderr, "^%i", u->power[i]);
-      }			    
+    if (u->power[i] < 0) {
+      for(int j = 0; j < -u->power[i]; j++) {
+	P("%s%s", p == 0 ? "1 / " : " / ", base_unit_string(u->base_unit[i]));
+      }
+    }
+    if (u->power[i] > 0) {
+      for(int j = 0; j < u->power[i]; j++) {
+	P("%s%s", p == 0 ? "" : " * ", base_unit_string(u->base_unit[i]));
+      }
     }
   }
-  if (!anything_printed) {
-    fprintf(stderr, "1");
+  if (p == 0) {
+    P("1");
   }
-  fprintf(stderr, "\n");
+#undef P
+  return xstrdup(result);
 }
-
 
 static void unit_mul_assign_base_unit_power(struct unit *u, base_unit_t b, power_t p) {
   for (int i = 0; i < MAX_UNIT_SIZE; i++) {
@@ -99,11 +107,29 @@ static void unit_div_assign(struct unit *lhs, const struct unit *rhs) {
   }
 }
 
+static struct unit unit_mul(struct unit a, struct unit b) {
+  unit_mul_assign(&a, &b);
+  return a;
+}
+
+static struct unit unit_div(struct unit a, struct unit b) {
+  unit_div_assign(&a, &b);
+  return a;
+}
+
 static void skip_white(const char **sp) {
   while (ISSPACE(**sp)) (*sp)++;
 }
 
 // Parser for units.
+
+/*
+TODO:
+struct parsed_unit {
+  bool ok;
+  struct unit unit;
+}
+*/
 
 static bool parse_factor(const char **sp, struct unit *out);
 static bool parse_product(const char **sp, struct unit *out);
@@ -168,79 +194,155 @@ static bool parse_product(const char **sp, struct unit *out) {
   }
   skip_white(sp);
   if (**sp != '\0') {
+    error(*sp);
     return false;
   }
   return true;
 }
 
 static bool parse_unit_string(const char *unit_str, struct unit *out) {
-  return parse_product(&unit_str, out);
+  bool ok = parse_product(&unit_str, out);
+  if (!ok) {
+    error("parse_unit_str");
+    error(unit_str);
+  }
+  return ok;
 }
 
 static bool parse_unit_attribute(tree t, struct unit *out) {
-  return
-    t != NULL_TREE &&
-    TREE_CODE(t) == TREE_LIST &&
-    TREE_CHAIN(t) == NULL_TREE &&
-    TREE_VALUE(t) != NULL_TREE &&
-    TREE_CODE(TREE_VALUE(t)) == STRING_CST &&
-    parse_unit_string(TREE_STRING_POINTER(TREE_VALUE(t)), out);
+  if (t == NULL_TREE) { error("null tree attribute"); return false; }
+  if (TREE_CODE(t) != TREE_LIST) { error("too few attribute args"); return false; }
+  if (TREE_CHAIN(t) != NULL_TREE) { error("too many attribute args"); return false; }
+  tree value = TREE_VALUE(t);
+  if (value == NULL_TREE) { error("null attribute value"); return false; }
+  if (TREE_CODE(value) != STRING_CST) { error("attribute not a string"); return false; }
+  const char *str = TREE_STRING_POINTER(value);
+  return parse_unit_string(str, out);
 }
 
 // Unit checking.
 
 struct maybe_unit {
-  bool have_unit;
+  bool has_unit;
   struct unit unit;
 };
 
 static struct maybe_unit no_unit;
 
 static struct maybe_unit just_one = {
-  .have_unit = true,
+  .has_unit = true,
   .unit = {},
 };
 
-/*
-struct maybe_unit just_unit(struct unit unit) {
+struct maybe_unit some_unit(struct unit unit) {
   struct maybe_unit m = {
-    .have_unit = true,
+    .has_unit = true,
     .unit = unit,
   };
   return m;
 }
-*/
+
+static struct maybe_unit check_multiplication(struct maybe_unit a,
+					      struct maybe_unit b,
+					      tree loc)
+{
+  (void) loc; // multiplication always succeeds
+  return a.has_unit && b.has_unit ? some_unit(unit_mul(a.unit, b.unit)) : no_unit;
+}
+
+static struct maybe_unit check_division(struct maybe_unit a,
+					      struct maybe_unit b,
+					      tree loc)
+{
+  (void) loc; // division always succeeds
+  return a.has_unit && b.has_unit ? some_unit(unit_div(a.unit, b.unit)) : no_unit;
+}
+
+static struct maybe_unit check_assignment(struct maybe_unit a, struct maybe_unit b, tree loc) {
+  if (a.has_unit && b.has_unit) {
+    unit c = unit_div(a.unit, b.unit);
+    if (!c.power[0] == 0) {
+      error_at(EXPR_LOCATION(loc), "assignment from unit `%s' to unit `%s'", unit_string(&b.unit), unit_string(&a.unit)); // TODO free
+    }
+  }
+  return a;
+}
+
+static struct maybe_unit check_comparison(struct maybe_unit a, struct maybe_unit b, tree loc) {
+  if (a.has_unit &&  b.has_unit) {
+    TODO("check that units are the same in comparison: `%s' and `%s'", unit_string(&a.unit), unit_string(&b.unit));
+    debug_generic_expr(loc);
+    (void) loc;
+  }
+  return just_one;
+}
+
+static struct maybe_unit check_attributes(tree attrs, tree loc) {
+  tree unit_attribute = lookup_attribute("unit", attrs);
+  if (unit_attribute == NULL_TREE) { return no_unit; }
+  struct unit unit;
+  if (!parse_unit_attribute(TREE_VALUE(unit_attribute), &unit)) {
+    error_at(EXPR_LOCATION(loc), "malformed unit attribute");
+    return no_unit;
+  }
+  return some_unit(unit);
+}
+
+static struct maybe_unit check_decl(tree decl) {
+  struct maybe_unit type_unit = check_attributes(TYPE_ATTRIBUTES(TREE_TYPE(decl)), decl);
+  struct maybe_unit decl_unit = check_attributes(DECL_ATTRIBUTES(decl), decl);
+  struct maybe_unit func_unit = TREE_CODE(decl) == RESULT_DECL ? check_attributes(DECL_ATTRIBUTES(DECL_CONTEXT(decl)), decl) : no_unit;
+  struct maybe_unit result = just_one;
+  int count = 0;
+  if (type_unit.has_unit) { count++; result = type_unit; }
+  if (decl_unit.has_unit) { count++; result = decl_unit; }
+  if (func_unit.has_unit) { count++; result = func_unit; }
+  if (count > 1) { error("too many unit attributes"); return no_unit; }
+  return result;
+}
 
 static struct maybe_unit check(tree t) {
+  if (t == NULL_TREE) {
+    fprintf(stderr, "check: null tree\n");
+    return no_unit;
+  }
   switch (TREE_CODE(t)) {
   case INTEGER_CST:
     return just_one;
   case REAL_CST:
     return just_one;
   case PARM_DECL:
-    return no_unit;
+    return check_decl(t);
   case RESULT_DECL:
-    return no_unit;
+    return check_decl(t);
   case RETURN_EXPR:
     return check(TREE_OPERAND(t, 0));
   case DECL_EXPR:
     check(DECL_EXPR_DECL(t));
     return no_unit;
   case VAR_DECL:
-    check(DECL_INITIAL(t));
-    return no_unit;
+    return check_assignment(check_decl(t), DECL_INITIAL(t) ? check(DECL_INITIAL(t)) : no_unit, t);
   case MODIFY_EXPR:
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    return no_unit;
+    return check_assignment(check(TREE_OPERAND(t, 0)),
+			    check(TREE_OPERAND(t, 1)),
+			    t);
   case MULT_EXPR:
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    return no_unit;
+    return check_multiplication(check(TREE_OPERAND(t, 0)),
+				check(TREE_OPERAND(t, 1)),
+				t);
+  case RDIV_EXPR:
+    return check_division(check(TREE_OPERAND(t, 0)),
+			  check(TREE_OPERAND(t, 1)),
+			  t);
+  case EQ_EXPR:
+  case NE_EXPR:
+  case GE_EXPR:
+  case LE_EXPR:
   case GT_EXPR:
-    check(TREE_OPERAND(t, 0));
-    check(TREE_OPERAND(t, 1));
-    return no_unit;
+  case LT_EXPR:
+    return check_comparison(check(TREE_OPERAND(t, 0)),
+			    check(TREE_OPERAND(t, 1)),
+			    t);
   case BIND_EXPR:
     (void) BIND_EXPR_VARS(t);
     check(BIND_EXPR_BODY(t));
@@ -253,9 +355,14 @@ static struct maybe_unit check(tree t) {
       }
       return last;
     }
+  case FLOAT_EXPR:
+  case NOP_EXPR:
+    // TODO how to know if the cast was explicit or implicit?
+    // TODO unit attribute?
+    check(TREE_OPERAND(t, 0));
+    return check_attributes(TYPE_ATTRIBUTES(TREE_TYPE(t)), t);
   default:
     TODO_HANDLE(t);
-    //debug_generic_expr(t);
     return no_unit;
   }
 }
@@ -277,52 +384,15 @@ static void handle_finish_type(void *gcc_data, void *user_data)
 static void handle_finish_decl(void *gcc_data, void *user_data)
 {
   (void) user_data;
-  tree t = (tree) gcc_data;
-  tree type = TREE_TYPE(t);
-  tree attrs = TYPE_ATTRIBUTES(type);
-  tree unit_attr = lookup_attribute("unit", attrs);
-
-  //fprintf(stderr, "finish_decl: %s %s\n",
-  //        get_tree_code_name(TREE_CODE(t)),
-  //        get_tree_code_name(TREE_CODE(type)));
-
-  //fprintf(stderr, "t: ");
-  //debug_generic_expr(t);
-  //fprintf(stderr, "type: ");
-  //debug_generic_expr(type);
-  //fprintf(stderr, "attrs: ");
-  //debug_tree_chain(attrs);
-  if (unit_attr != NULL_TREE) {
-    //fprintf(stderr, "unit: ");
-    //debug_generic_expr(unit_attr);
-  }
+  tree decl = (tree) gcc_data;
+  check_decl(decl);
 }
 
 static void handle_finish_function(void *gcc_data, void *user_data) {
   (void) user_data;
-  tree t = (tree) gcc_data;
-  tree args = DECL_ARGUMENTS(t);
-  tree type = TREE_TYPE(t);
-  tree body = DECL_SAVED_TREE(t);
-  (void) args;
-  (void) type;
+  tree func = (tree) gcc_data;
+  tree body = DECL_SAVED_TREE(func);
   check(body);
-}
-
-static tree handle_unit_attribute(tree *node, tree name, tree args,
-				  int flags, bool *no_add_attrs) {
-  (void) node;
-  (void) name;
-  (void) flags;
-  (void) no_add_attrs;
-  struct unit u;
-  if (!parse_unit_attribute(args, &u)) {
-    error("unit not well-formed");
-  } else {
-    (void) dump_unit;
-    //dump_unit(&u);
-  }
-  return NULL_TREE;
 }
 
 // GCC plugin initialization.
@@ -332,10 +402,11 @@ const struct attribute_spec unit_attribute_spec = {
   .min_length = 1,
   .max_length = 1,
   .decl_required = false,
-  .type_required = true,
+  .type_required = false,
   .function_type_required = false,
-  .handler = &handle_unit_attribute,
-  .affects_type_identity = false,
+  .affects_type_identity = true,
+  .handler = NULL,
+  .exclude = NULL,
 };
 
 static void register_attributes(void *gcc_data, void *user_data)
