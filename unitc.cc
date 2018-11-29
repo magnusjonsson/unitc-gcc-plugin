@@ -14,8 +14,8 @@ __attribute__ ((visibility ("default")))
 int plugin_is_GPL_compatible;
 
 
-#define TODO(fmt, ...) warning(0, "unitc TODO: " fmt, ##__VA_ARGS__)
-#define TODO_HANDLE(t) TODO("handle %s in %s:%i", get_tree_code_name(TREE_CODE(t)), __FUNCTION__, __LINE__)
+#define TODO(loc, fmt, ...) warning_at(EXPR_LOCATION(loc), 0, "unitc TODO: " fmt, ##__VA_ARGS__)
+#define TODO_HANDLE(t) TODO(t, "handle %s in %s:%i", get_tree_code_name(TREE_CODE(t)), __FUNCTION__, __LINE__)
 
 // Base units.
 
@@ -270,7 +270,7 @@ static struct maybe_unit check_assignment(struct maybe_unit a, struct maybe_unit
 
 static struct maybe_unit check_comparison(struct maybe_unit a, struct maybe_unit b, tree loc) {
   if (a.has_unit &&  b.has_unit) {
-    TODO("check that units are the same in comparison: `%s' and `%s'", unit_string(&a.unit), unit_string(&b.unit));
+    TODO(loc,"check that units are the same in comparison: `%s' and `%s'", unit_string(&a.unit), unit_string(&b.unit));
     debug_generic_expr(loc);
     (void) loc;
   }
@@ -392,10 +392,19 @@ static void handle_finish_function(void *gcc_data, void *user_data) {
   (void) user_data;
   tree func = (tree) gcc_data;
   tree body = DECL_SAVED_TREE(func);
+  (void) body;
+  //check(body);
+}
+
+static void handle_pre_genericize(void *gcc_data, void *user_data) {
+  tree func = (tree) gcc_data;
+  (void) user_data;
+  tree body = DECL_SAVED_TREE(func);
+  (void) body;
   check(body);
 }
 
-// GCC plugin initialization.
+  // GCC plugin initialization.
 
 const struct attribute_spec unit_attribute_spec = {
   .name = "unit",
@@ -431,5 +440,6 @@ int plugin_init(struct plugin_name_args *plugin_info,
   register_callback(plugin_name, PLUGIN_FINISH_TYPE, &handle_finish_type, NULL);
   register_callback(plugin_name, PLUGIN_FINISH_DECL, &handle_finish_decl, NULL);
   register_callback(plugin_name, PLUGIN_FINISH_PARSE_FUNCTION, &handle_finish_function, NULL);
+  register_callback(plugin_name, PLUGIN_PRE_GENERICIZE, &handle_pre_genericize, NULL);
   return 0;
 }
