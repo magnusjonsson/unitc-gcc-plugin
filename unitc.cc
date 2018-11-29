@@ -258,11 +258,11 @@ static struct maybe_unit check_division(struct maybe_unit a,
   return a.has_unit && b.has_unit ? some_unit(unit_div(a.unit, b.unit)) : no_unit;
 }
 
-static struct maybe_unit check_assignment(struct maybe_unit a, struct maybe_unit b, tree loc) {
+static struct maybe_unit check_assignment(const char *operation_type, struct maybe_unit a, struct maybe_unit b, tree loc) {
   if (a.has_unit && b.has_unit) {
     unit c = unit_div(a.unit, b.unit);
     if (!c.power[0] == 0) {
-      error_at(EXPR_LOCATION(loc), "assignment from unit `%s' to unit `%s'", unit_string(&b.unit), unit_string(&a.unit)); // TODO free
+      error_at(EXPR_LOCATION(loc), "%s from unit `%s' to unit `%s'", operation_type, unit_string(&b.unit), unit_string(&a.unit)); // TODO free
     }
   }
   return a;
@@ -321,9 +321,10 @@ static struct maybe_unit check(tree t) {
     check(DECL_EXPR_DECL(t));
     return no_unit;
   case VAR_DECL:
-    return check_assignment(check_decl(t), DECL_INITIAL(t) ? check(DECL_INITIAL(t)) : no_unit, t);
+    return check_assignment("initialization assignment", check_decl(t), DECL_INITIAL(t) ? check(DECL_INITIAL(t)) : no_unit, t);
   case MODIFY_EXPR:
-    return check_assignment(check(TREE_OPERAND(t, 0)),
+    return check_assignment("assignment",
+			    check(TREE_OPERAND(t, 0)),
 			    check(TREE_OPERAND(t, 1)),
 			    t);
   case MULT_EXPR:
@@ -357,10 +358,10 @@ static struct maybe_unit check(tree t) {
     }
   case FLOAT_EXPR:
   case NOP_EXPR:
-    // TODO how to know if the cast was explicit or implicit?
-    // TODO unit attribute?
-    check(TREE_OPERAND(t, 0));
-    return check_attributes(TYPE_ATTRIBUTES(TREE_TYPE(t)), t);
+    return check_assignment("cast",
+			    check_attributes(TYPE_ATTRIBUTES(TREE_TYPE(t)), t),
+			    check(TREE_OPERAND(t, 0)),
+			    t);
   default:
     TODO_HANDLE(t);
     return no_unit;
