@@ -117,6 +117,11 @@ static struct unit unit_div(struct unit a, struct unit b) {
   return a;
 }
 
+static bool unit_eq_p(struct unit a, struct unit b) {
+  struct unit tmp = unit_div(a, b);
+  return tmp.power[0] == 0;
+}
+
 static void skip_white(const char **sp) {
   while (ISSPACE(**sp)) (*sp)++;
 }
@@ -259,20 +264,15 @@ static struct maybe_unit check_division(struct maybe_unit a,
 }
 
 static struct maybe_unit check_assignment(const char *operation_type, struct maybe_unit a, struct maybe_unit b, tree loc) {
-  if (a.has_unit && b.has_unit) {
-    unit c = unit_div(a.unit, b.unit);
-    if (!c.power[0] == 0) {
-      error_at(EXPR_LOCATION(loc), "%s from unit `%s' to unit `%s'", operation_type, unit_string(&b.unit), unit_string(&a.unit)); // TODO free
-    }
+  if (a.has_unit && b.has_unit && !unit_eq_p(a.unit, b.unit)) {
+    error_at(EXPR_LOCATION(loc), "%s from unit `%s' to unit `%s'", operation_type, unit_string(&b.unit), unit_string(&a.unit)); // TODO free
   }
   return a;
 }
 
 static struct maybe_unit check_comparison(struct maybe_unit a, struct maybe_unit b, tree loc) {
-  if (a.has_unit &&  b.has_unit) {
-    TODO(loc,"check that units are the same in comparison: `%s' and `%s'", unit_string(&a.unit), unit_string(&b.unit));
-    debug_generic_expr(loc);
-    (void) loc;
+  if (a.has_unit && b.has_unit && !unit_eq_p(a.unit, b.unit)) {
+    error_at(EXPR_LOCATION(loc), "comparison between incompatible units `%s' and `%s'", unit_string(&b.unit), unit_string(&a.unit)); // TODO free
   }
   return just_one;
 }
