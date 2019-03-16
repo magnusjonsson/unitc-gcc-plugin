@@ -323,7 +323,8 @@ static struct maybe_unit check(tree t) {
   case VAR_DECL:
     return check_assignment("initialization assignment", check_decl(t), DECL_INITIAL(t) ? check(DECL_INITIAL(t)) : no_unit, t);
   case MODIFY_EXPR:
-    return check_assignment("assignment",
+    return check_assignment(TREE_CODE(TREE_OPERAND(t, 0)) == RESULT_DECL
+			    ? "return value assignment" : "assignment",
 			    check(TREE_OPERAND(t, 0)),
 			    check(TREE_OPERAND(t, 1)),
 			    t);
@@ -358,10 +359,13 @@ static struct maybe_unit check(tree t) {
     }
   case FLOAT_EXPR:
   case NOP_EXPR:
-    return check_assignment("cast",
-			    check_attributes(TYPE_ATTRIBUTES(TREE_TYPE(t)), t),
-			    check(TREE_OPERAND(t, 0)),
-			    t);
+    // GCC's C front end inserts a lot of implicit casts, so
+    // we can't check casts here. If it becomes possible to
+    // distinguish which casts were in the user code, we could
+    // check them here.
+    //
+    // TODO handle pointers, at the very least void *.
+    return check(TREE_OPERAND(t, 0));
   default:
     TODO_HANDLE(t);
     return no_unit;

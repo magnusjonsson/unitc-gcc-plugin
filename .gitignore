@@ -34,3 +34,6 @@
 
 # Emacs backup files
 *~
+
+# Unitc test output
+test_output_actual

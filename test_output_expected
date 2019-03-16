@@ -1,0 +1,32 @@
+testsource.c: In function ‘error_return’:
+testsource.c:3:42: error: return value assignment from unit `m' to unit `1'
+ int error_return(int unit(m) x) { return x; }
+                                          ^
+testsource.c: In function ‘error_square_with_unit_1’:
+testsource.c:10:64: error: return value assignment from unit `m * m' to unit `m'
+ int unit(m) error_square_with_unit_1(int unit(m) x) { return x * x; }
+                                                              ~~^~~
+testsource.c: In function ‘error_square_with_unit_2’:
+testsource.c:11:64: error: return value assignment from unit `m * m' to unit `1'
+ int         error_square_with_unit_2(int unit(m) x) { return x * x; }
+                                                              ~~^~~
+testsource.c: In function ‘error_assign’:
+testsource.c:13:46: error: assignment from unit `m' to unit `1'
+ void error_assign (int a, int unit(m) b) { a = b; }
+                                            ~~^~~
+testsource.c: In function ‘error_compare’:
+testsource.c:14:46: error: comparison between incompatible units `m' and `1'
+ void error_compare(int a, int unit(m) b) { a == b; }
+                                            ~~^~~~
+testsource.c: In function ‘error_pointer_assign’:
+testsource.c:16:56: error: assignment from unit `m' to unit `1'
+ void error_pointer_assign (int *a, int unit(m) *b) { a = b; }
+                                                      ~~^~~
+testsource.c: In function ‘error_pointer_compare’:
+testsource.c:17:56: error: comparison between incompatible units `m' and `1'
+ void error_pointer_compare(int *a, int unit(m) *b) { a == b; }
+                                                      ~~^~~~
+testsource.c: In function ‘cast_1_error’:
+testsource.c:22:48: error: return value assignment from unit `1' to unit `m'
+ double unit(m) cast_1_error(double a) { return (double unit(m)) a; }
+                                                ^~~~~~~~~~~~~~~~~~

@@ -1,46 +1,26 @@
 #define unit(u) __attribute((unit(#u)))
 
-enum simple_enum { A, B };
-enum complex_enum { C = 1, D = -3};
-typedef enum { E, H } typedef_enum;
+int error_return(int unit(m) x) { return x; }
+int one(void) { return 1; }
 
-int length1 unit(meters);
+int square_unitless(int x) { return x * x; }
 
-int unit(meters) length2;
+int unit(m*m) square_with_unit(int unit(m) x) { return x * x; }
 
-unit(meters) int length3;
+int unit(m) error_square_with_unit_1(int unit(m) x) { return x * x; }
+int         error_square_with_unit_2(int unit(m) x) { return x * x; }
 
-double unit(meters * meters) area;
+void error_assign (int a, int unit(m) b) { a = b; }
+void error_compare(int a, int unit(m) b) { a == b; }
 
-double unit(1) unitless1;
+void error_pointer_assign (int *a, int unit(m) *b) { a = b; }
+void error_pointer_compare(int *a, int unit(m) *b) { a == b; }
 
-double unit(meters / meters) unitless2;
+float unit(a) explicit_cast_repr_1(int unit(a) a) { return (float) a; }
+float unit(a) implicit_cast_repr_2(int unit(a) a) { return a; }
 
-double one(void) {
-  return 1;
-}
-
-double square(double x) {
-  return x * x;
-}
-
-double unit(meters*meters) square_length(double unit(meters) x) {
-  return x * x;
-}
-
-double unit(meters) square_length_error(double unit(meters) x) {
-  return x * x;
-}
+double unit(m) cast_1_error(double a) { return (double unit(m)) a; }
 
 int main(int argc, char **argv) {
-  int x = argc;
-  length1 = length2;
-  area = length1 * length2;
-
-  int b;
-  b = (double) length1 == length2;
-  b = (double unit(blah)) length1 == (double) length2;
-  b = 0;
-  return x >= 2;
+  return 0;
 }
-
